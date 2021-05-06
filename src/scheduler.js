@@ -6,7 +6,7 @@ const user = require('./user');
 
 const baseUrl = 'https://cdn-api.co-vin.in/api';
 // because the cloudflare server is blocking node-fetch user agent requests
-const userAgent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/90.0.4430.93 Safari/537.36';
+const userAgent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36(KHTML, like Gecko) Chrome/90.0.4430.93 Safari/537.36';
 
 const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
@@ -99,15 +99,49 @@ const getBeneficiaryIds = async (token) => {
   }
 };
 
+const filterCenters = (centers) => {
+  const {
+    preferredPincodes,
+    vaccineType,
+    free,
+    above45
+  } = user;
+  let selectedSession = {}
+  centers.find((center) => {
+    if ((preferredPincodes && preferredPincodes.indexOf(center.pincode) > -1) ||
+          (preferredPincodes === undefined ||
+          (preferredPincodes === null) ||
+          (!preferredPincodes.length)) &&
+        ((free === true && center.fee_type === 'Free') || 
+          (free === false && center.fee_type === 'Paid') || 
+          (free === undefined || free === null))) {
+      const sessions = center.sessions.filter((session) => (
+        // (session.available_capacity > 0) &&
+        ((session.vaccine && session.vaccine === vaccineType) || 
+          (vaccineType === undefined || vaccineType === null)) && 
+        ((above45 === true && session.min_age_limit === 45) ||
+          (above45 === false && session.min_age_limit === 18) || 
+          (above45 === undefined || above45 === null))
+      ));
+      if (sessions.length) {
+        console.log(`\nFound availability at ${center.name}. Availability: ${sessions[0].available_capacity}\n`);
+        selectedSession = {
+          center: center.center_id,
+          session_id: sessions[0].session_id,
+          slots: sessions[0].slots
+        };
+        return selectedSession;
+      } 
+    }
+  });
+  return selectedSession;
+}
+
 const getAvailableSession = async (user) => {
   try {
-    const {
-      preferredPincodes,
-      vaccineType,
-      free
-    } = user;
+    const { districtId } = user;
     const params = new URLSearchParams({
-      district_id: user.districtId,
+      district_id: districtId || 395,
       date: moment().format('DD-MM-YYYY')
     });
     const url = `${baseUrl}/v2/appointment/sessions/calendarByDistrict`;
@@ -117,27 +151,7 @@ const getAvailableSession = async (user) => {
     const startTime = moment();
     while(momentTimeDiff(moment(), startTime, 'minutes') < 5) {
       const { centers } = await httpCaller('GET', {}, `${url}?${params}`);
-      centers.find(center => {
-        if ((preferredPincodes.indexOf(center.pincode) > -1 || !preferredPincodes.length) &&
-            (free === true && center.fee_type === 'Free') && 
-            (free === false && center.fee_type === 'Paid')) {
-          const sessions = center.sessions.filter(session => (
-            session.available_capacity > 0 &&
-            (vaccineType && session.vaccine === vaccineType) && 
-            session.min_age_limit === 18
-          ));
-          if (sessions.length) {
-            console.log(`Found availability in ${center.name}\
-              \nAvailability: ${session.available_capacity}\n`);
-            selectedSession = {
-              center: center.center_id,
-              session_id: sessions[0].session_id,
-              slots: sessions[0].slots
-            };
-            return true;
-          }
-        }
-      });
+      const selectedSession = filterCenters(centers);
       if (Object.keys(selectedSession).length) {
         return selectedSession;
       }
@@ -200,6 +214,9 @@ const init = async () => {
     } else if (momentTimeDiff(startTime, moment()) < 0) {
       console.log('startTime need to be in the future\n');
       stopExecution();
+    }
+    if (!user.mobile) {
+      user.mobile = await askQuestion('Enter Mobile Number: \n');
     }
     const token = await authenticate(user.mobile);
     const beneficiaries = await getBeneficiaryIds(token);
