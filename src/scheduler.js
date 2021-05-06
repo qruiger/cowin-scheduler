@@ -138,7 +138,7 @@ const filterCenters = (centers) => {
     ) {
       const sessions = center.sessions.filter(
         (session) =>
-          // (session.available_capacity > 0) &&
+          (session.available_capacity > 0) &&
           ((session.vaccine && session.vaccine === vaccineType) ||
             vaccineType === undefined ||
             vaccineType === null) &&
