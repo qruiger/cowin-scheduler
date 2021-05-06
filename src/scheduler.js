@@ -2,6 +2,7 @@ const fetch = require('node-fetch');
 const moment = require('moment');
 const crypto = require('crypto-js');
 const readline = require('readline');
+const jwtDecode = require('jwt-decode');
 const user = require('./user');
 
 const baseUrl = 'https://cdn-api.co-vin.in/api';
@@ -36,7 +37,7 @@ const httpCaller = async (method, body, url, token = '') => {
     const response = await fetch(url, params);
     if (!response.ok) {
       if (url.includes('schedule')) {
-        return response.status;
+        return response;
       }
       throw `Something wrong, received http status code: ${response.status}`;
     }
@@ -60,6 +61,8 @@ const askQuestion = async (query) => {
   );
 };
 
+const logWithTimeStamp = (message) => console.log(`\n<${moment().format('HH:mm:ss')}> ${message}`);
+
 const authenticate = async (mobile) => {
   try {
     // found the key and text in js code of cowin website
@@ -74,7 +77,7 @@ const authenticate = async (mobile) => {
       body,
       `${baseUrl}/v2/auth/generateMobileOTP`
     );
-    console.log(`\n${moment().format('HH:mm:ss')} OTP request sent`);
+    logWithTimeStamp('OTP request sent');
     const otp = await askQuestion('Enter OTP:\n');
     const otpHashed = crypto.SHA256(otp).toString(crypto.enc.Hex);
     const { token } = await httpCaller(
@@ -96,7 +99,7 @@ const getBeneficiaryIds = async (token) => {
       `${baseUrl}/v2/appointment/beneficiaries`,
       token
     );
-    console.log('\n\nList of eligible beneficiaries\n');
+    console.log('\nList of eligible beneficiaries\n');
     let beneficiaryReferenceIds = beneficiaries.map((beneficiary) => {
       const {
         vaccination_status,
@@ -172,10 +175,9 @@ const getAvailableSession = async (user) => {
     });
     const url = `${baseUrl}/v2/appointment/sessions/calendarByDistrict`;
     let selectedSession = {};
-    console.log('\n');
-    console.log(moment().format('HH:mm:ss'), 'Searching...');
+    logWithTimeStamp('Searching...');
     const startTime = moment();
-    while (momentTimeDiff(moment(), startTime, 'minutes') < 5) {
+    while (momentTimeDiff(moment(), startTime) < 240) {
       const { centers } = await httpCaller('GET', {}, `${url}?${params}`);
       const selectedSession = filterCenters(centers);
       if (Object.keys(selectedSession).length) {
@@ -190,7 +192,7 @@ const getAvailableSession = async (user) => {
   }
 };
 
-const schedule = async (sessionScheduleDetails, token) => {
+const schedule = async (sessionScheduleDetails, token, expTime) => {
   try {
     const {
       center_id,
@@ -205,8 +207,12 @@ const schedule = async (sessionScheduleDetails, token) => {
       beneficiaries,
       slot: slots[0],
     };
+    logWithTimeStamp('Scheduling...');
     const startTime = moment();
-    while (momentTimeDiff(moment(), startTime, 'minutes') < 5) {
+    while (momentTimeDiff(moment(), startTime) < 360) {
+      if (momentTimeDiff(moment.unix(expTime), moment()) <= 0) {
+        return null;
+      }
       const data = await httpCaller(
         'POST',
         body,
@@ -215,9 +221,12 @@ const schedule = async (sessionScheduleDetails, token) => {
       );
       if (data.appointmentId) {
         return data.appointmentId;
+      } else if (data.status === '409') {
+        console.log(`Slots booked!`);
+        return null;
       } else {
         console.log(
-          `Something wrong, received http status code: ${response.status}`
+          `Something wrong, received http status code: ${data}`
         );
       }
       await delay(100);
@@ -242,50 +251,79 @@ const looper = async (question) => {
   }
 };
 
-const init = async () => {
-  try {
-    const startTime = moment(user.startTime, 'HH:mm:ss').toISOString();
-    const bufferTime = 360; // seconds
-    if (momentTimeDiff(startTime, moment()) > bufferTime) {
-      const delayInMs =
-        (momentTimeDiff(startTime, moment()) - bufferTime) * 1000;
-      console.log(`OTP will be requested ${
-        bufferTime / 60
-      } minutes before start time\
-      \nSleeping for ${Math.ceil(delayInMs / 1000 / 60)} minutes\n`);
-      await delay(delayInMs);
-    } else if (momentTimeDiff(startTime, moment()) < 0) {
-      console.log('startTime need to be in the future\n');
+const preStart = async (user) => {
+  let { startTime } = user;
+  const bufferTime = 300; // send otp request before 5 minutes
+  if (!startTime) {
+    startTime = await askQuestion('Enter start time in HH:mm:ss 24hour format\n');
+    if (!moment(startTime, 'HH:mm:ss', true).isValid()) {
+      console.log('Illegal format\n');
       stopExecution();
     }
-    if (!user.mobile) {
-      user.mobile = await askQuestion('Enter Mobile Number: \n');
+  }
+  startTime = moment(startTime, 'HH:mm:ss').toISOString();
+  if (momentTimeDiff(startTime, moment()) > bufferTime) {
+    const delayInMs =
+      (momentTimeDiff(startTime, moment()) - bufferTime) * 1000;
+    console.log(`\nOTP will be requested ${
+      bufferTime / 60
+    } minutes before start time\
+    \nSleeping for ${Math.ceil(delayInMs / 1000 / 60)} minutes\n`);
+    await delay(delayInMs);
+  } else if (momentTimeDiff(startTime, moment()) < 0) {
+    console.log('startTime need to be in the future\n');
+    stopExecution();
+  }
+  return startTime;
+};
+
+const getExpTime = (token) => {
+  const decodedToken = jwtDecode(token);
+  const { exp: expTime } = decodedToken;
+  return expTime;
+};
+
+const init = async () => {
+  try {
+    let { mobile } = user;
+    if (!mobile) {
+      mobile = await askQuestion('Enter Mobile Number: \n');
     }
-    const token = await authenticate(user.mobile);
+    const startTime = await preStart(user);
+    let token = await authenticate(mobile);
+    let expTime = getExpTime(token);
     const beneficiaries = await getBeneficiaryIds(token);
     await looper(
-      '\nThe above listed beneficaries will be scheduled for vaccination'
+      'The above listed beneficaries will be scheduled for vaccination'
     );
-    while (momentTimeDiff(startTime, moment()) > 1) {
-      const delayInMs = (momentTimeDiff(startTime, moment()) - 1) * 1000;
-      console.log(`\nSlot booking will start exactly at ${user.startTime}\n`);
+    while (momentTimeDiff(startTime, moment(), 'milliseconds') >= 200) {
+      const delayInMs = (momentTimeDiff(startTime, moment(), 'milliseconds') - 200);
+      console.log(`\nSlot booking will start exactly at ${moment(startTime).format('HH:mm:ss')}\n`);
       await delay(delayInMs);
     }
-    console.log('\nReady to rock and roll');
+    logWithTimeStamp('Ready to rock and roll\n');
     let sessionDetails = {};
     sessionDetails = await getAvailableSession(user);
     while (!sessionDetails || !Object.keys(sessionDetails).length) {
-      if (momentTimeDiff(moment(), startTime, 'seconds') > 600) {
-        stopExecution();
-      }
       const searchAgain = await looper('\nSearch again?');
       if (searchAgain) {
         sessionDetails = await getAvailableSession(user);
       }
     }
-    // to be tested
-    // const appointmentId = await schedule({ ...sessionDetails, beneficiaries });
-    // console.log(`Successfully booked: ${appointmentId}`);
+    // yet to be tested
+    // let appointmentId = '';
+    // appointmentId = await schedule({ ...sessionDetails, beneficiaries }, token, expTime);
+    // while (!appointmentId) {
+    //   if (momentTimeDiff(moment.unix(expTime), moment()) <= 0) {
+    //     token = await authenticate(mobile);
+    //     expTime = getExpTime(token);
+    //   }
+    //   const trySchedulingAgain = await looper('\nTry to Schedule again?');
+    //   if (trySchedulingAgain) {
+    //     appointmentId = await schedule({ ...sessionDetails, beneficiaries }, token, expTime);
+    //   }
+    // }
+    // logWithTimeStamp(`Successfully booked!\nAppointment Id: ${appointmentId}\n`);
   } catch (error) {
     console.log(error);
   }
