@@ -61,7 +61,8 @@ const askQuestion = async (query) => {
   );
 };
 
-const logWithTimeStamp = (message) => console.log(`\n<${moment().format('HH:mm:ss')}> ${message}`);
+const logWithTimeStamp = (message) =>
+  console.log(`\n<${moment().format('HH:mm:ss')}> ${message}`);
 
 const authenticate = async (mobile) => {
   try {
@@ -141,7 +142,7 @@ const filterCenters = (centers) => {
     ) {
       const sessions = center.sessions.filter(
         (session) =>
-          (session.available_capacity > 0) &&
+          session.available_capacity > 0 &&
           ((session.vaccine && session.vaccine === vaccineType) ||
             vaccineType === undefined ||
             vaccineType === null) &&
@@ -155,7 +156,7 @@ const filterCenters = (centers) => {
           `\nFound availability at ${center.name}. Availability: ${sessions[0].available_capacity}\n`
         );
         selectedSession = {
-          center: center.center_id,
+          center_id: center.center_id,
           session_id: sessions[0].session_id,
           slots: sessions[0].slots,
         };
@@ -225,9 +226,7 @@ const schedule = async (sessionScheduleDetails, token, expTime) => {
         console.log(`Slots booked!`);
         return null;
       } else {
-        console.log(
-          `Something wrong, received http status code: ${data}`
-        );
+        console.log(`Something wrong, received http status code: ${data}`);
       }
       await delay(100);
     }
@@ -255,7 +254,9 @@ const preStart = async (user) => {
   let { startTime } = user;
   const bufferTime = 300; // send otp request before 5 minutes
   if (!startTime) {
-    startTime = await askQuestion('Enter start time in HH:mm:ss 24hour format\n');
+    startTime = await askQuestion(
+      'Enter start time in HH:mm:ss 24hour format\n'
+    );
     if (!moment(startTime, 'HH:mm:ss', true).isValid()) {
       console.log('Illegal format\n');
       stopExecution();
@@ -263,8 +264,7 @@ const preStart = async (user) => {
   }
   startTime = moment(startTime, 'HH:mm:ss').toISOString();
   if (momentTimeDiff(startTime, moment()) > bufferTime) {
-    const delayInMs =
-      (momentTimeDiff(startTime, moment()) - bufferTime) * 1000;
+    const delayInMs = (momentTimeDiff(startTime, moment()) - bufferTime) * 1000;
     console.log(`\nOTP will be requested ${
       bufferTime / 60
     } minutes before start time\
@@ -297,8 +297,13 @@ const init = async () => {
       'The above listed beneficaries will be scheduled for vaccination'
     );
     while (momentTimeDiff(startTime, moment(), 'milliseconds') >= 200) {
-      const delayInMs = (momentTimeDiff(startTime, moment(), 'milliseconds') - 200);
-      console.log(`\nSlot booking will start exactly at ${moment(startTime).format('HH:mm:ss')}\n`);
+      const delayInMs =
+        momentTimeDiff(startTime, moment(), 'milliseconds') - 200;
+      console.log(
+        `\nSlot booking will start exactly at ${moment(startTime).format(
+          'HH:mm:ss'
+        )}\n`
+      );
       await delay(delayInMs);
     }
     logWithTimeStamp('Ready to rock and roll\n');
@@ -311,19 +316,29 @@ const init = async () => {
       }
     }
     // yet to be tested
-    // let appointmentId = '';
-    // appointmentId = await schedule({ ...sessionDetails, beneficiaries }, token, expTime);
-    // while (!appointmentId) {
-    //   if (momentTimeDiff(moment.unix(expTime), moment()) <= 0) {
-    //     token = await authenticate(mobile);
-    //     expTime = getExpTime(token);
-    //   }
-    //   const trySchedulingAgain = await looper('\nTry to Schedule again?');
-    //   if (trySchedulingAgain) {
-    //     appointmentId = await schedule({ ...sessionDetails, beneficiaries }, token, expTime);
-    //   }
-    // }
-    // logWithTimeStamp(`Successfully booked!\nAppointment Id: ${appointmentId}\n`);
+    let appointmentId = '';
+    appointmentId = await schedule(
+      { ...sessionDetails, beneficiaries },
+      token,
+      expTime
+    );
+    while (!appointmentId) {
+      if (momentTimeDiff(moment.unix(expTime), moment()) <= 0) {
+        token = await authenticate(mobile);
+        expTime = getExpTime(token);
+      }
+      const trySchedulingAgain = await looper('\nTry to Schedule again?');
+      if (trySchedulingAgain) {
+        appointmentId = await schedule(
+          { ...sessionDetails, beneficiaries },
+          token,
+          expTime
+        );
+      }
+    }
+    logWithTimeStamp(
+      `Successfully booked!\nAppointment Id: ${appointmentId}\n`
+    );
   } catch (error) {
     console.log(error);
   }
