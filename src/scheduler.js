@@ -19,6 +19,8 @@ const stopExecution = () => {
 
 const momentTimeDiff = (a, b, unit = 'seconds') => moment(a).diff(b, unit);
 
+const getRandomNumber = (min, max) => Math.floor(Math.random() * (max - min + 1) + min);
+
 const httpCaller = async (method, body, url, token = '') => {
   try {
     let headers = {
@@ -36,7 +38,11 @@ const httpCaller = async (method, body, url, token = '') => {
       method === 'POST' ? { ...params, body: JSON.stringify(body) } : params;
     const response = await fetch(url, params);
     if (!response.ok) {
-      if (url.includes('schedule')) {
+      if (
+        ['calendarByDistrict', 'schedule'].some((subStr) =>
+          url.includes(subStr)
+        )
+      ) {
         return response;
       }
       throw `Something wrong, received http status code: ${response.status}`;
@@ -180,11 +186,13 @@ const getAvailableSession = async (user) => {
     const startTime = moment();
     while (momentTimeDiff(moment(), startTime) < 240) {
       const { centers } = await httpCaller('GET', {}, `${url}?${params}`);
-      const selectedSession = filterCenters(centers);
-      if (Object.keys(selectedSession).length) {
-        return selectedSession;
+      if (centers && centers.length) {
+        const selectedSession = filterCenters(centers);
+        if (Object.keys(selectedSession).length) {
+          return selectedSession;
+        }
       }
-      await delay(300);
+      await delay(getRandomNumber(100, 300));
     }
     console.log('Could not find any slots to book!');
     return selectedSession;
@@ -229,9 +237,11 @@ const schedule = async (sessionScheduleDetails, token, expTime) => {
         logWithTimeStamp(JSON.stringify(data));
         return data;
       } else {
-        logWithTimeStamp(`Something wrong, received http status code: ${data.status}`);
+        logWithTimeStamp(
+          `Something wrong, received http status code: ${data.status}`
+        );
       }
-      await delay(100);
+      await delay(getRandomNumber(50, 100));
     }
   } catch (error) {
     throw error;
