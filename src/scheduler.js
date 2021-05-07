@@ -220,13 +220,16 @@ const schedule = async (sessionScheduleDetails, token, expTime) => {
         `${baseUrl}/v2/appointment/schedule`,
         token
       );
-      if (data.appointmentId) {
-        return data.appointmentId;
-      } else if (data.status === '409') {
-        console.log(`Slots booked!`);
+      if (data.appointment_id) {
+        return data.appointment_id;
+      } else if (data.status === 409) {
+        logWithTimeStamp(`Slots booked!`);
         return null;
+      } else if (data.status === 200) {
+        logWithTimeStamp(JSON.stringify(data));
+        return data;
       } else {
-        console.log(`Something wrong, received http status code: ${data}`);
+        logWithTimeStamp(`Something wrong, received http status code: ${data.status}`);
       }
       await delay(100);
     }
