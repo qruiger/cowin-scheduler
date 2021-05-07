@@ -283,6 +283,11 @@ const getExpTime = (token) => {
   return expTime;
 };
 
+const logTokenExpTime = (expTime) => {
+  const expTimeFromNow = moment.unix(expTime).fromNow();
+  logWithTimeStamp(`Token expire ${expTimeFromNow} \n`);
+};
+
 const init = async () => {
   try {
     let { mobile } = user;
@@ -310,20 +315,22 @@ const init = async () => {
     let sessionDetails = {};
     sessionDetails = await getAvailableSession(user);
     while (!sessionDetails || !Object.keys(sessionDetails).length) {
+      logTokenExpTime(expTime);
       const searchAgain = await looper('\nSearch again?');
       if (searchAgain) {
         sessionDetails = await getAvailableSession(user);
       }
     }
     // yet to be tested
-    let appointmentId = '';
-    appointmentId = await schedule(
+    let appointmentId = await schedule(
       { ...sessionDetails, beneficiaries },
       token,
       expTime
     );
     while (!appointmentId) {
+      logTokenExpTime(expTime);
       if (momentTimeDiff(moment.unix(expTime), moment()) <= 0) {
+        logWithTimeStamp('Token expired\n');
         token = await authenticate(mobile);
         expTime = getExpTime(token);
       }
