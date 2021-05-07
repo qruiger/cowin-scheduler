@@ -19,7 +19,21 @@ const stopExecution = () => {
 
 const momentTimeDiff = (a, b, unit = 'seconds') => moment(a).diff(b, unit);
 
-const getRandomNumber = (min, max) => Math.floor(Math.random() * (max - min + 1) + min);
+const getRandomNumber = (min, max) =>
+  Math.floor(Math.random() * (max - min + 1) + min);
+
+const getExpTime = (token) => {
+  const decodedToken = jwtDecode(token);
+  const { exp: expTime } = decodedToken;
+  return expTime;
+};
+
+const logTokenExpTime = (expTime) => {
+  const expTimeFromNow = moment.unix(expTime).fromNow();
+  logWithTimeStamp(`Token expire ${expTimeFromNow} \n`);
+};
+
+const isNullOrDefined = (value) => value === null || value === undefined;
 
 const httpCaller = async (method, body, url, token = '') => {
   try {
@@ -137,25 +151,21 @@ const filterCenters = (centers) => {
   let selectedSession = {};
   centers.find((center) => {
     if (
-      (preferredPincodes && preferredPincodes.indexOf(center.pincode) > -1) ||
-      ((preferredPincodes === undefined ||
-        preferredPincodes === null ||
+      ((preferredPincodes && preferredPincodes.indexOf(center.pincode) > -1) ||
+        isNullOrDefined(preferredPincodes) ||
         !preferredPincodes.length) &&
-        ((free === true && center.fee_type === 'Free') ||
-          (free === false && center.fee_type === 'Paid') ||
-          free === undefined ||
-          free === null))
+      ((free === true && center.fee_type === 'Free') ||
+        (free === false && center.fee_type === 'Paid') ||
+        isNullOrDefined(free))
     ) {
       const sessions = center.sessions.filter(
         (session) =>
           session.available_capacity > 0 &&
           ((session.vaccine && session.vaccine === vaccineType) ||
-            vaccineType === undefined ||
-            vaccineType === null) &&
+            isNullOrDefined(vaccineType)) &&
           ((above45 === true && session.min_age_limit === 45) ||
             (above45 === false && session.min_age_limit === 18) ||
-            above45 === undefined ||
-            above45 === null)
+            isNullOrDefined(above45))
       );
       if (sessions.length) {
         console.log(
@@ -288,17 +298,6 @@ const preStart = async (user) => {
     stopExecution();
   }
   return startTime;
-};
-
-const getExpTime = (token) => {
-  const decodedToken = jwtDecode(token);
-  const { exp: expTime } = decodedToken;
-  return expTime;
-};
-
-const logTokenExpTime = (expTime) => {
-  const expTimeFromNow = moment.unix(expTime).fromNow();
-  logWithTimeStamp(`Token expire ${expTimeFromNow} \n`);
 };
 
 const init = async () => {
