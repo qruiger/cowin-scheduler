@@ -238,8 +238,8 @@ const schedule = async (sessionScheduleDetails, token, expTime) => {
         `${baseUrl}/v2/appointment/schedule`,
         token
       );
-      if (data.appointment_id) {
-        return data.appointment_id;
+      if (data.appointment_confirmation_no) {
+        return data.appointment_confirmation_no;
       } else if (data.status === 409) {
         logWithTimeStamp(`Slots booked!`);
         return null;
@@ -334,12 +334,12 @@ const init = async () => {
       }
     }
     // yet to be tested
-    let appointmentId = await schedule(
+    let appointmentConfirmationNo = await schedule(
       { ...sessionDetails, beneficiaries },
       token,
       expTime
     );
-    while (!appointmentId) {
+    while (!appointmentConfirmationNo) {
       logTokenExpTime(expTime);
       if (momentTimeDiff(moment.unix(expTime), moment()) <= 0) {
         logWithTimeStamp('Token expired\n');
@@ -348,7 +348,7 @@ const init = async () => {
       }
       const trySchedulingAgain = await looper('\nTry to Schedule again?');
       if (trySchedulingAgain) {
-        appointmentId = await schedule(
+        appointmentConfirmationNo = await schedule(
           { ...sessionDetails, beneficiaries },
           token,
           expTime
@@ -356,7 +356,7 @@ const init = async () => {
       }
     }
     logWithTimeStamp(
-      `Successfully booked!\nAppointment Id: ${appointmentId}\n`
+      `Successfully booked!\nAppointment Id: ${appointmentConfirmationNo}\n`
     );
   } catch (error) {
     console.log(error);
