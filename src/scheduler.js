@@ -3,6 +3,8 @@ const moment = require('moment');
 const crypto = require('crypto-js');
 const readline = require('readline');
 const jwtDecode = require('jwt-decode');
+const fs = require('fs');
+const path = require('path');
 const user = require('./user');
 
 const baseUrl = 'https://cdn-api.co-vin.in/api';
@@ -34,6 +36,9 @@ const logTokenExpTime = (expTime) => {
 };
 
 const isNullOrDefined = (value) => value === null || value === undefined;
+
+const logWithTimeStamp = (message) =>
+  console.log(`\n<${moment().format('HH:mm:ss')}> ${message}`);
 
 const httpCaller = async (method, body, url, token = '') => {
   try {
@@ -80,9 +85,6 @@ const askQuestion = async (query) => {
     })
   );
 };
-
-const logWithTimeStamp = (message) =>
-  console.log(`\n<${moment().format('HH:mm:ss')}> ${message}`);
 
 const authenticate = async (mobile) => {
   try {
@@ -194,6 +196,7 @@ const getAvailableSession = async (user) => {
     let selectedSession = {};
     logWithTimeStamp('Searching...');
     const startTime = moment();
+    // 4 minutes
     while (momentTimeDiff(moment(), startTime) < 240) {
       const { centers } = await httpCaller('GET', {}, `${url}?${params}`);
       if (centers && centers.length) {
@@ -214,6 +217,7 @@ const getAvailableSession = async (user) => {
 const schedule = async (sessionScheduleDetails, token, expTime) => {
   try {
     const {
+      captcha,
       center_id,
       session_id,
       beneficiaries,
@@ -221,6 +225,7 @@ const schedule = async (sessionScheduleDetails, token, expTime) => {
     } = sessionScheduleDetails;
     const body = {
       dose: 1,
+      captcha,
       center_id,
       session_id,
       beneficiaries,
@@ -228,6 +233,7 @@ const schedule = async (sessionScheduleDetails, token, expTime) => {
     };
     logWithTimeStamp('Scheduling...');
     const startTime = moment();
+    // 6 minutes
     while (momentTimeDiff(moment(), startTime) < 360) {
       if (momentTimeDiff(moment.unix(expTime), moment()) <= 0) {
         return null;
@@ -253,6 +259,30 @@ const schedule = async (sessionScheduleDetails, token, expTime) => {
       }
       await delay(getRandomNumber(50, 100));
     }
+  } catch (error) {
+    throw error;
+  }
+};
+
+const getRecaptchaText = async (token) => {
+  try {
+    let { captcha } = await httpCaller(
+      'POST',
+      {},
+      `${baseUrl}/v2/auth/getRecaptcha`,
+      token
+    );
+    captcha = captcha.replace(/\\\//g, '/');
+    fs.writeFileSync('captcha.svg', captcha);
+    logWithTimeStamp(
+      'Saved captcha file successfully\
+      Ctrl + Click on the link below to view Captcha\n'
+    );
+    const captchaHtml = '<!DOCTYPE html><html><body><img src=captcha.svg></body></html>';
+    fs.writeFileSync('captcha.html', captchaHtml);
+    console.log(`file://${path.resolve('captcha.html')}`);
+    const captchaText = await askQuestion('Enter Captcha Text:\n');
+    return captchaText;
   } catch (error) {
     throw error;
   }
@@ -313,6 +343,7 @@ const init = async () => {
     await looper(
       'The above listed beneficaries will be scheduled for vaccination'
     );
+    const captcha = await getRecaptchaText(token);
     while (momentTimeDiff(startTime, moment(), 'milliseconds') >= 200) {
       const delayInMs =
         momentTimeDiff(startTime, moment(), 'milliseconds') - 200;
@@ -335,7 +366,7 @@ const init = async () => {
     }
     // yet to be tested
     let appointmentConfirmationNo = await schedule(
-      { ...sessionDetails, beneficiaries },
+      { ...sessionDetails, beneficiaries, captcha },
       token,
       expTime
     );
@@ -349,14 +380,14 @@ const init = async () => {
       const trySchedulingAgain = await looper('\nTry to Schedule again?');
       if (trySchedulingAgain) {
         appointmentConfirmationNo = await schedule(
-          { ...sessionDetails, beneficiaries },
+          { ...sessionDetails, beneficiaries, captcha },
           token,
           expTime
         );
       }
     }
     logWithTimeStamp(
-      `Successfully booked!\nAppointment Id: ${appointmentConfirmationNo}\n`
+      `Successfully booked!\nAppointment Confirmation Number: ${appointmentConfirmationNo}\n`
     );
   } catch (error) {
     console.log(error);
