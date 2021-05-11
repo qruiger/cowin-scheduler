@@ -278,7 +278,7 @@ const getRecaptchaText = async (token) => {
       'Saved captcha file successfully\
       Ctrl + Click on the link below to view Captcha\n'
     );
-    const captchaHtml = '<!DOCTYPE html><html><body><img src=captcha.svg></body></html>';
+    const captchaHtml = '<!DOCTYPE html><html><body><img src="captcha.svg"></body></html>';
     fs.writeFileSync('captcha.html', captchaHtml);
     console.log(`file://${path.resolve('captcha.html')}`);
     const captchaText = await askQuestion('Enter Captcha Text:\n');
