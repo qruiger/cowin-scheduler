@@ -148,7 +148,7 @@ const getBeneficiaryIds = async (token) => {
   }
 };
 
-const filterCenters = (centers) => {
+const filterCenters = (centers, user) => {
   const { preferredPincodes, vaccineType, free, above45 } = user;
   let selectedSession = {};
   centers.find((center) => {
@@ -187,20 +187,29 @@ const filterCenters = (centers) => {
 
 const getAvailableSession = async (user) => {
   try {
-    const { districtId } = user;
-    const params = new URLSearchParams({
-      district_id: districtId || 395,
-      date: moment().format('DD-MM-YYYY'),
-    });
-    const url = `${baseUrl}/v2/appointment/sessions/calendarByDistrict`;
+    const { districtId, preferredPincodes } = user;
+    let url;
+    if (preferredPincodes.length === 1) {
+      const params = new URLSearchParams({
+        pincode: preferredPincodes[0],
+        date: moment().format('DD-MM-YYYY'),
+      });
+      url = `${baseUrl}/v2/appointment/sessions/calendarByPin?${params}`;
+    } else {
+      const params = new URLSearchParams({
+        district_id: districtId || 395,
+        date: moment().format('DD-MM-YYYY'),
+      });
+      url = `${baseUrl}/v2/appointment/sessions/calendarByDistrict?${params}`;
+    }
     let selectedSession = {};
     logWithTimeStamp('Searching...');
     const startTime = moment();
     // 4 minutes
     while (momentTimeDiff(moment(), startTime) < 240) {
-      const { centers } = await httpCaller('GET', {}, `${url}?${params}`);
+      const { centers } = await httpCaller('GET', {}, url);
       if (centers && centers.length) {
-        const selectedSession = filterCenters(centers);
+        const selectedSession = filterCenters(centers, user);
         if (Object.keys(selectedSession).length) {
           return selectedSession;
         }
