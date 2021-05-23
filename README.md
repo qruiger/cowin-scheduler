@@ -6,3 +6,5 @@ CLI tool to book vaccination slots
 - Install nodejs [v14.x.x](https://nodejs.org/en/download/)
 - Install dependencies `npm install` 
 - Start script `npm start`
+
+![demo-edited](https://user-images.githubusercontent.com/17964902/119270605-25d83f80-bc1b-11eb-9748-ce549133be0f.png)
