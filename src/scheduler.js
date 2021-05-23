@@ -40,6 +40,19 @@ const isNullOrDefined = (value) => value === null || value === undefined;
 const logWithTimeStamp = (message) =>
   console.log(`\n<${moment().format('HH:mm:ss')}> ${message}`);
 
+const askQuestion = async (query) => {
+  const rL = readline.createInterface({
+    input: process.stdin,
+    output: process.stdout,
+  });
+  return new Promise((resolve) =>
+    rL.question(query, (ans) => {
+      rL.close();
+      resolve(ans);
+    })
+  );
+};
+
 const httpCaller = async (method, body, url, token = '') => {
   try {
     let headers = {
@@ -57,33 +70,22 @@ const httpCaller = async (method, body, url, token = '') => {
       method === 'POST' ? { ...params, body: JSON.stringify(body) } : params;
     const response = await fetch(url, params);
     if (!response.ok) {
+      const errorMessage = `Something wrong, received http status code: ${response.status}`;
       if (
         ['calendar', 'schedule'].some((subStr) =>
           url.includes(subStr)
         )
       ) {
+        logWithTimeStamp(errorMessage);
         return response;
       }
-      throw `Something wrong, received http status code: ${response.status}`;
+      throw errorMessage;
     }
     const jsonData = await response.json();
     return jsonData;
   } catch (error) {
     throw error;
   }
-};
-
-const askQuestion = async (query) => {
-  const rL = readline.createInterface({
-    input: process.stdin,
-    output: process.stdout,
-  });
-  return new Promise((resolve) =>
-    rL.question(query, (ans) => {
-      rL.close();
-      resolve(ans);
-    })
-  );
 };
 
 const authenticate = async (mobile) => {
