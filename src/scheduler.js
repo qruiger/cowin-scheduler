@@ -58,7 +58,7 @@ const httpCaller = async (method, body, url, token = '') => {
     const response = await fetch(url, params);
     if (!response.ok) {
       if (
-        ['calendarByDistrict', 'schedule'].some((subStr) =>
+        ['calendar', 'schedule'].some((subStr) =>
           url.includes(subStr)
         )
       ) {
