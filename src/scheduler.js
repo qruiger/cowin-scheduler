@@ -114,7 +114,7 @@ const authenticate = async (mobile) => {
   }
 };
 
-const getBeneficiaryIds = async (token) => {
+const getBeneficiaryIds = async (token, above45) => {
   try {
     const { beneficiaries } = await httpCaller(
       'GET',
@@ -124,14 +124,17 @@ const getBeneficiaryIds = async (token) => {
     );
     console.log('\nList of eligible beneficiaries\n');
     let beneficiaryReferenceIds = beneficiaries.map((beneficiary) => {
-      const {
-        vaccination_status,
-        beneficiary_reference_id,
-        birth_year,
-        name,
-      } = beneficiary;
+      const { vaccination_status, beneficiary_reference_id, birth_year, name } =
+        beneficiary;
       if (vaccination_status === 'Not Vaccinated') {
-        if (2021 - parseInt(birth_year) < 45) {
+        let eligible = false;
+        if (
+          (above45 && 2021 - parseInt(birth_year) > 45) ||
+          (!above45 && 2021 - parseInt(birth_year) < 45)
+        ) {
+          eligible = true;
+        }
+        if (eligible) {
           console.log('Beneficiary Name: %s', name);
           console.log(
             'Beneficiary Reference Id: %d\n',
@@ -185,7 +188,7 @@ const filterCenters = (centers, user) => {
   return selectedSession;
 };
 
-const getAvailableSession = async (user) => {
+const getAvailableSession = async (user, token) => {
   try {
     const { districtId, preferredPincodes } = user;
     let url;
@@ -207,7 +210,7 @@ const getAvailableSession = async (user) => {
     const startTime = moment();
     // 4 minutes
     while (momentTimeDiff(moment(), startTime) < 240) {
-      const { centers } = await httpCaller('GET', {}, url);
+      const { centers } = await httpCaller('GET', {}, url, token);
       if (centers && centers.length) {
         const selectedSession = filterCenters(centers, user);
         if (Object.keys(selectedSession).length) {
@@ -225,13 +228,8 @@ const getAvailableSession = async (user) => {
 
 const schedule = async (sessionScheduleDetails, token, expTime) => {
   try {
-    const {
-      captcha,
-      center_id,
-      session_id,
-      beneficiaries,
-      slots,
-    } = sessionScheduleDetails;
+    const { captcha, center_id, session_id, beneficiaries, slots } =
+      sessionScheduleDetails;
     const body = {
       dose: 1,
       captcha,
@@ -284,10 +282,10 @@ const getRecaptchaText = async (token) => {
     captcha = captcha.replace(/\\\//g, '/');
     fs.writeFileSync('captcha.svg', captcha);
     logWithTimeStamp(
-      'Saved captcha file successfully\
-      Ctrl + Click on the link below to view Captcha\n'
+      'Saved captcha file successfully.\nCtrl + Click on the link below to view Captcha\n'
     );
-    const captchaHtml = '<!DOCTYPE html><html><body><img src="captcha.svg"></body></html>';
+    const captchaHtml =
+      '<!DOCTYPE html><html><body><img src="captcha.svg"></body></html>';
     fs.writeFileSync('captcha.html', captchaHtml);
     console.log(`file://${path.resolve('captcha.html')}`);
     const captchaText = await askQuestion('Enter Captcha Text:\n');
@@ -297,7 +295,7 @@ const getRecaptchaText = async (token) => {
   }
 };
 
-const looper = async (question) => {
+const looper = async (question, returnFalseIfNo = false) => {
   while (1) {
     const shouldProceed = await askQuestion(
       `${question}\nConfirm by typing \'Yes\' or \'No\'\n`
@@ -305,6 +303,9 @@ const looper = async (question) => {
     if (['yes', 'y'].includes(shouldProceed.toString().toLowerCase())) {
       return true;
     } else if (['no', 'n'].includes(shouldProceed.toString().toLowerCase())) {
+      if (returnFalseIfNo) {
+        return false;
+      }
       stopExecution();
     } else {
       console.log("Illegal input. Valid inputs are 'Yes' or 'No'");
@@ -341,14 +342,22 @@ const preStart = async (user) => {
 
 const init = async () => {
   try {
-    let { mobile } = user;
+    let { mobile, above45, districtId } = user;
+    if (isNullOrDefined(districtId)) {
+      await looper(
+        '\ndistrictId was not specified in user.js\nProceed with Mumbai\'s districtId?\n'
+      );
+    }
     if (!mobile) {
       mobile = await askQuestion('Enter Mobile Number: \n');
+    }
+    if (isNullOrDefined(above45)) {
+      above45 = await looper('\nBeneficiaries above 45?', true);
     }
     const startTime = await preStart(user);
     let token = await authenticate(mobile);
     let expTime = getExpTime(token);
-    const beneficiaries = await getBeneficiaryIds(token);
+    const beneficiaries = await getBeneficiaryIds(token, above45);
     await looper(
       'The above listed beneficaries will be scheduled for vaccination'
     );
@@ -365,7 +374,7 @@ const init = async () => {
     }
     logWithTimeStamp('Ready to rock and roll\n');
     let sessionDetails = {};
-    sessionDetails = await getAvailableSession(user);
+    sessionDetails = await getAvailableSession(user, token);
     while (!sessionDetails || !Object.keys(sessionDetails).length) {
       logTokenExpTime(expTime);
       const searchAgain = await looper('\nSearch again?');
