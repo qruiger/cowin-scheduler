@@ -32,7 +32,7 @@ const getExpTime = (token) => {
 
 const logTokenExpTime = (expTime) => {
   const expTimeFromNow = moment.unix(expTime).fromNow();
-  logWithTimeStamp(`Token expire ${expTimeFromNow} \n`);
+  logWithTimeStamp(`Token expires ${expTimeFromNow}\n`);
 };
 
 const isNullOrDefined = (value) => value === null || value === undefined;
@@ -71,11 +71,7 @@ const httpCaller = async (method, body, url, token = '') => {
     const response = await fetch(url, params);
     if (!response.ok) {
       const errorMessage = `Something wrong, received http status code: ${response.status}`;
-      if (
-        ['calendar', 'schedule'].some((subStr) =>
-          url.includes(subStr)
-        )
-      ) {
+      if (['calendar', 'schedule'].some((subStr) => url.includes(subStr))) {
         logWithTimeStamp(errorMessage);
         return response;
       }
@@ -110,13 +106,20 @@ const authenticate = async (mobile) => {
       { txnId, otp: otpHashed },
       `${baseUrl}/v2/auth/validateMobileOtp`
     );
-    return token;
+    if (token) {
+      logWithTimeStamp('Successfully Authenticated.');
+      logTokenExpTime(getExpTime(token));
+    } else {
+      throw 'Authentication failed!';
+    }
+    const captcha = await getRecaptchaText(token);
+    return { token, captcha };
   } catch (error) {
     throw error;
   }
 };
 
-const getBeneficiaryIds = async (token, above45) => {
+const getBeneficiaryIds = async (token, above45, dose) => {
   try {
     const { beneficiaries } = await httpCaller(
       'GET',
@@ -128,20 +131,21 @@ const getBeneficiaryIds = async (token, above45) => {
     let beneficiaryReferenceIds = beneficiaries.map((beneficiary) => {
       const { vaccination_status, beneficiary_reference_id, birth_year, name } =
         beneficiary;
-      if (vaccination_status === 'Not Vaccinated') {
+      if (
+        (dose === 1 && vaccination_status === 'Not Vaccinated') ||
+        (dose === 2 && vaccination_status === 'Partially Vaccinated')
+      ) {
         let eligible = false;
         if (
-          (above45 && 2021 - parseInt(birth_year) > 45) ||
-          (!above45 && 2021 - parseInt(birth_year) < 45)
+          (above45 && moment().year() - parseInt(birth_year) >= 45) ||
+          (!above45 && moment().year() - parseInt(birth_year) < 45)
         ) {
           eligible = true;
         }
         if (eligible) {
           console.log('Beneficiary Name: %s', name);
-          console.log(
-            'Beneficiary Reference Id: %d\n',
-            beneficiary_reference_id
-          );
+          console.log('Beneficiary Reference Id: %d', beneficiary_reference_id);
+          console.log(`Beneficiary Birth Year: ${birth_year}\n`);
           return beneficiary_reference_id;
         }
       }
@@ -154,7 +158,7 @@ const getBeneficiaryIds = async (token, above45) => {
 };
 
 const filterCenters = (centers, user) => {
-  const { preferredPincodes, vaccineType, free, above45 } = user;
+  const { preferredPincodes, vaccineType, free, above45, dose } = user;
   let selectedSession = {};
   centers.find((center) => {
     if (
@@ -167,7 +171,8 @@ const filterCenters = (centers, user) => {
     ) {
       const sessions = center.sessions.filter(
         (session) =>
-          session.available_capacity > 0 &&
+          ((dose === 1 && session.available_capacity_dose1 > 0) ||
+            (dose === 2 && session.available_capacity_dose2 > 0)) &&
           ((session.vaccine && session.vaccine === vaccineType) ||
             isNullOrDefined(vaccineType)) &&
           ((above45 === true && session.min_age_limit === 45) ||
@@ -175,8 +180,12 @@ const filterCenters = (centers, user) => {
             isNullOrDefined(above45))
       );
       if (sessions.length) {
+        const availability =
+          dose === 1
+            ? sessions[0].available_capacity_dose1
+            : sessions[0].available_capacity_dose2;
         console.log(
-          `\nFound availability at ${center.name}. Availability: ${sessions[0].available_capacity}\n`
+          `\nFound availability at ${center.name}.\nAvailability: ${availability}`
         );
         selectedSession = {
           center_id: center.center_id,
@@ -190,7 +199,7 @@ const filterCenters = (centers, user) => {
   return selectedSession;
 };
 
-const getAvailableSession = async (user, token) => {
+const getAvailableSession = async ({ user, token, expTime }) => {
   try {
     const { districtId, preferredPincodes } = user;
     let url;
@@ -207,11 +216,15 @@ const getAvailableSession = async (user, token) => {
       });
       url = `${baseUrl}/v2/appointment/sessions/calendarByDistrict?${params}`;
     }
-    let selectedSession = {};
+    let selectedSession = null;
     logWithTimeStamp('Searching...');
     const startTime = moment();
-    // 4 minutes
-    while (momentTimeDiff(moment(), startTime) < 240) {
+    // search for 7 minutes
+    while (momentTimeDiff(moment(), startTime) < 420) {
+      logWithTimeStamp('Searching...');
+      if (momentTimeDiff(moment.unix(expTime), moment()) <= 0) {
+        return null;
+      }
       const { centers } = await httpCaller('GET', {}, url, token);
       if (centers && centers.length) {
         const selectedSession = filterCenters(centers, user);
@@ -219,21 +232,29 @@ const getAvailableSession = async (user, token) => {
           return selectedSession;
         }
       }
-      await delay(getRandomNumber(100, 300));
+      // fuzzing delay between calls
+      await delay(getRandomNumber(1500, 2500));
     }
-    console.log('Could not find any slots to book!');
+    logWithTimeStamp('Could not find any slots to book!');
     return selectedSession;
   } catch (error) {
     throw error;
   }
 };
 
-const schedule = async (sessionScheduleDetails, token, expTime) => {
+const schedule = async ({
+  dose,
+  captcha,
+  center_id,
+  session_id,
+  beneficiaries,
+  slots,
+  token,
+  expTime,
+}) => {
   try {
-    const { captcha, center_id, session_id, beneficiaries, slots } =
-      sessionScheduleDetails;
     const body = {
-      dose: 1,
+      dose,
       captcha,
       center_id,
       session_id,
@@ -242,8 +263,8 @@ const schedule = async (sessionScheduleDetails, token, expTime) => {
     };
     logWithTimeStamp('Scheduling...');
     const startTime = moment();
-    // 6 minutes
-    while (momentTimeDiff(moment(), startTime) < 360) {
+    // try to book slot for 3 minutes
+    while (momentTimeDiff(moment(), startTime) < 180) {
       if (momentTimeDiff(moment.unix(expTime), moment()) <= 0) {
         return null;
       }
@@ -266,6 +287,7 @@ const schedule = async (sessionScheduleDetails, token, expTime) => {
           `Something wrong, received http status code: ${data.status}`
         );
       }
+      // we can't afford to increase the delay here because of limited slots
       await delay(getRandomNumber(50, 100));
     }
   } catch (error) {
@@ -289,7 +311,7 @@ const getRecaptchaText = async (token) => {
     const captchaHtml =
       '<!DOCTYPE html><html><body><img src="captcha.svg"></body></html>';
     fs.writeFileSync('captcha.html', captchaHtml);
-    console.log(`file://${path.resolve('captcha.html')}`);
+    console.log(`file://${path.resolve('captcha.html')}\n`);
     const captchaText = await askQuestion('Enter Captcha Text:\n');
     return captchaText;
   } catch (error) {
@@ -315,12 +337,52 @@ const looper = async (question, returnFalseIfNo = false) => {
   }
 };
 
+const yetAnotherLooper = async ({
+  token,
+  captcha,
+  mobile,
+  functionToCall,
+  functionParams,
+  repeatMessage,
+}) => {
+  let expTime = getExpTime(token);
+  let response = await functionToCall({
+    ...functionParams,
+    captcha,
+    token,
+    expTime,
+  });
+  let newToken = token;
+  let newCaptcha = captcha;
+  while (!response) {
+    logTokenExpTime(expTime);
+    if (momentTimeDiff(moment.unix(expTime), moment()) <= 0) {
+      logWithTimeStamp('Token expired\n');
+      // destructure without declare
+      let {} = ({ token: newToken, captcha: newCaptcha } = await authenticate(
+        mobile
+      ));
+      expTime = getExpTime(newToken);
+    }
+    const repeat = await looper(repeatMessage);
+    if (repeat) {
+      response = await functionToCall({
+        ...functionParams,
+        captcha: newCaptcha,
+        token: newToken,
+        expTime,
+      });
+    }
+  }
+  return { response, token: newToken, captcha: newCaptcha };
+};
+
 const preStart = async (user) => {
   let { startTime } = user;
   const bufferTime = 300; // send otp request before 5 minutes
   if (!startTime) {
     startTime = await askQuestion(
-      'Enter start time in HH:mm:ss 24hour format\n'
+      '\nEnter start time in HH:mm:ss 24hour format\n'
     );
     if (!moment(startTime, 'HH:mm:ss', true).isValid()) {
       console.log('Illegal format\n');
@@ -344,11 +406,20 @@ const preStart = async (user) => {
 
 const init = async () => {
   try {
-    let { mobile, above45, districtId } = user;
-    if (isNullOrDefined(districtId)) {
+    let { mobile, above45, dose } = user;
+    const { districtId, preferredPincodes } = user;
+    if (isNullOrDefined(districtId) && preferredPincodes.length > 1) {
       await looper(
-        '\ndistrictId was not specified in user.js\nProceed with Mumbai\'s districtId?\n'
+        "\ndistrictId was not specified in user.js\nProceed with Mumbai's districtId?"
       );
+    }
+    if (isNullOrDefined(dose) || ![1, 2].includes(dose)) {
+      const doseResponse = await looper(
+        '\ndose was not specified in user.js\nProceed to book dose 1?',
+        true
+      );
+      dose = doseResponse ? 1 : 2;
+      console.log(`Proceeding to book dose ${dose}`);
     }
     if (!mobile) {
       mobile = await askQuestion('Enter Mobile Number: \n');
@@ -357,13 +428,17 @@ const init = async () => {
       above45 = await looper('\nBeneficiaries above 45?', true);
     }
     const startTime = await preStart(user);
-    let token = await authenticate(mobile);
-    let expTime = getExpTime(token);
-    const beneficiaries = await getBeneficiaryIds(token, above45);
+    const { token, captcha } = await authenticate(mobile);
+    const beneficiaries = await getBeneficiaryIds(token, above45, dose);
+    if (beneficiaries.length === 0) {
+      console.log(
+        '\nNo beneficaries found eligible as per the filters in user.js'
+      );
+      stopExecution();
+    }
     await looper(
       'The above listed beneficaries will be scheduled for vaccination'
     );
-    const captcha = await getRecaptchaText(token);
     while (momentTimeDiff(startTime, moment(), 'milliseconds') >= 200) {
       const delayInMs =
         momentTimeDiff(startTime, moment(), 'milliseconds') - 200;
@@ -375,42 +450,41 @@ const init = async () => {
       await delay(delayInMs);
     }
     logWithTimeStamp('Ready to rock and roll\n');
-    let sessionDetails = {};
-    sessionDetails = await getAvailableSession(user, token);
-    while (!sessionDetails || !Object.keys(sessionDetails).length) {
-      logTokenExpTime(expTime);
-      const searchAgain = await looper('\nSearch again?');
-      if (searchAgain) {
-        sessionDetails = await getAvailableSession(user);
-      }
-    }
-    // yet to be tested
-    let appointmentConfirmationNo = await schedule(
-      { ...sessionDetails, beneficiaries, captcha },
+    const {
+      response: sessionDetails,
+      token: newToken,
+      captcha: newCaptcha,
+    } = await yetAnotherLooper({
       token,
-      expTime
-    );
-    while (!appointmentConfirmationNo) {
-      logTokenExpTime(expTime);
-      if (momentTimeDiff(moment.unix(expTime), moment()) <= 0) {
-        logWithTimeStamp('Token expired\n');
-        token = await authenticate(mobile);
-        expTime = getExpTime(token);
-      }
-      const trySchedulingAgain = await looper('\nTry to Schedule again?');
-      if (trySchedulingAgain) {
-        appointmentConfirmationNo = await schedule(
-          { ...sessionDetails, beneficiaries, captcha },
-          token,
-          expTime
-        );
-      }
-    }
+      captcha,
+      mobile,
+      functionToCall: getAvailableSession,
+      functionParams: {
+        user: {
+          ...user,
+          above45,
+          dose,
+        },
+      },
+      repeatMessage: '\nSearch again?',
+    });
+    const { response: appointmentConfirmationNo } = await yetAnotherLooper({
+      token: newToken,
+      captcha: newCaptcha,
+      mobile,
+      functionToCall: schedule,
+      functionParams: {
+        ...sessionDetails,
+        beneficiaries,
+        dose,
+      },
+      repeatMessage: '\nTry to Schedule again?',
+    });
     logWithTimeStamp(
       `Successfully booked!\nAppointment Confirmation Number: ${appointmentConfirmationNo}\n`
     );
   } catch (error) {
-    console.log(error);
+    console.log(`\n${error}`);
   }
 };
 
