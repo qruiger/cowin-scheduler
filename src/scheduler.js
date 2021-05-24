@@ -221,7 +221,6 @@ const getAvailableSession = async ({ user, token, expTime }) => {
     const startTime = moment();
     // search for 7 minutes
     while (momentTimeDiff(moment(), startTime) < 420) {
-      logWithTimeStamp('Searching...');
       if (momentTimeDiff(moment.unix(expTime), moment()) <= 0) {
         return null;
       }
