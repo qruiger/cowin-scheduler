@@ -4,7 +4,7 @@ module.exports = {
   mobile: '9876543210',
   preferredPincodes: [400001, 400002, 400003, 400004],
   free: true, // comment the line, if you want both free or paid
-  vaccineType: 'COVISHIELD', // other value is COVAXIN
+  vaccineType: ['COVISHIELD'], // or ['COVAXIN', 'SPUTNIK V']
   above45: false,
   districtId: 395, // Mumbai 395, Thane 392
 };

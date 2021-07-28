@@ -173,8 +173,11 @@ const filterCenters = (centers, user) => {
         (session) =>
           ((dose === 1 && session.available_capacity_dose1 > 0) ||
             (dose === 2 && session.available_capacity_dose2 > 0)) &&
-          ((session.vaccine && session.vaccine === vaccineType) ||
-            isNullOrDefined(vaccineType)) &&
+          ((session.vaccine &&
+            vaccineType &&
+            vaccineType.indexOf(session.vaccine) > -1) ||
+            isNullOrDefined(vaccineType) ||
+            !vaccineType.length) &&
           ((above45 === true && session.min_age_limit === 45) ||
             (above45 === false && session.min_age_limit === 18) ||
             isNullOrDefined(above45))
