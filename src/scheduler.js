@@ -178,8 +178,11 @@ const filterCenters = (centers, user) => {
             vaccineType.indexOf(session.vaccine) > -1) ||
             isNullOrDefined(vaccineType) ||
             !vaccineType.length) &&
-          ((above45 === true && session.min_age_limit === 45) ||
-            (above45 === false && session.min_age_limit === 18) ||
+          (session.allow_all_age ||
+            (above45 === true && session.min_age_limit === 45) ||
+            (above45 === false &&
+              session.min_age_limit === 18 &&
+              session.max_age_limit === 44) ||
             isNullOrDefined(above45))
       );
       if (sessions.length) {
